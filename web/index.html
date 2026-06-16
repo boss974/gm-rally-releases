@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="/gm-rally-copilot/">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="GM Rally Copilot — assistant copilote de rallye.">
+
+  <!-- Anti-indexation / anti-IA : demande aux moteurs et crawlers IA de ne pas indexer, archiver ni entraîner. -->
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, noai, noimageai">
+  <meta name="googlebot" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="gm_rally_copilot">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>GM Rally Copilot</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Demande d'accès aux capteurs de mouvement (gyroscope / accéléromètre).
+    // iOS exige requestPermission() depuis un geste utilisateur, sinon les
+    // flux DeviceMotion/DeviceOrientation restent muets. Renvoie true si OK
+    // (ou si la permission n'est pas requise sur ce navigateur).
+    window.gmRequestMotion = async function () {
+      try {
+        var ok = true;
+        if (typeof DeviceMotionEvent !== 'undefined' &&
+            typeof DeviceMotionEvent.requestPermission === 'function') {
+          var a = await DeviceMotionEvent.requestPermission();
+          ok = ok && (a === 'granted');
+        }
+        if (typeof DeviceOrientationEvent !== 'undefined' &&
+            typeof DeviceOrientationEvent.requestPermission === 'function') {
+          var b = await DeviceOrientationEvent.requestPermission();
+          ok = ok && (b === 'granted');
+        }
+        return ok;
+      } catch (e) { return false; }
+    };
+
+    // Force l'activation de TOUS les capteurs en déclenchant chaque invite de
+    // permission (GPS, mouvement, micro, caméra). Renvoie un JSON d'état.
+    window.gmActivateAll = async function () {
+      var status = { gps: false, motion: false, mic: false, camera: false };
+      // GPS
+      try {
+        await new Promise(function (resolve) {
+          if (!navigator.geolocation) { resolve(); return; }
+          navigator.geolocation.getCurrentPosition(
+            function () { status.gps = true; resolve(); },
+            function () { resolve(); },
+            { enableHighAccuracy: true, timeout: 8000 }
+          );
+        });
+      } catch (e) {}
+      // Mouvement (gyro/accéléro) — iOS demande, Android est automatique
+      try { status.motion = await window.gmRequestMotion(); } catch (e) {}
+      // Micro
+      try {
+        var aud = await navigator.mediaDevices.getUserMedia({ audio: true });
+        status.mic = true;
+        aud.getTracks().forEach(function (t) { t.stop(); });
+      } catch (e) {}
+      // Caméra (arrière de préférence)
+      try {
+        var vid = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        status.camera = true;
+        vid.getTracks().forEach(function (t) { t.stop(); });
+      } catch (e) {}
+      return JSON.stringify(status);
+    };
+
+    // --- GPS direct via navigator.geolocation (contourne geolocator_web) ---
+    window.gmGeo = { has: false, err: null, lat: 0, lon: 0, acc: 0, alt: 0, spd: -1, hdg: -1, ts: 0, watchId: -1 };
+    window.gmGeoStart = function () {
+      try {
+        if (!navigator.geolocation) { window.gmGeo.err = 'no_geolocation'; return; }
+        if (window.gmGeo.watchId >= 0) { navigator.geolocation.clearWatch(window.gmGeo.watchId); }
+        window.gmGeo.err = null;
+        window.gmGeo.watchId = navigator.geolocation.watchPosition(
+          function (p) {
+            var c = p.coords;
+            window.gmGeo.has = true;
+            window.gmGeo.err = null;
+            window.gmGeo.lat = c.latitude;
+            window.gmGeo.lon = c.longitude;
+            window.gmGeo.acc = c.accuracy;
+            window.gmGeo.alt = (c.altitude == null) ? 0 : c.altitude;
+            window.gmGeo.spd = (c.speed == null) ? -1 : c.speed;
+            window.gmGeo.hdg = (c.heading == null) ? -1 : c.heading;
+            window.gmGeo.ts = p.timestamp;
+          },
+          function (e) {
+            window.gmGeo.err = (e && e.code ? e.code : '?') + ':' + (e && e.message ? e.message : 'erreur');
+          },
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 }
+        );
+      } catch (e) { window.gmGeo.err = 'exc:' + e; }
+    };
+    window.gmGeoStop = function () {
+      try {
+        if (window.gmGeo.watchId >= 0 && navigator.geolocation) {
+          navigator.geolocation.clearWatch(window.gmGeo.watchId);
+          window.gmGeo.watchId = -1;
+        }
+      } catch (e) {}
+    };
+    window.gmGeoSnapshot = function () { return JSON.stringify(window.gmGeo); };
+  </script>
+  <script>
+    // Déterrent léger contre la copie : bloque clic droit, sélection et glisser.
+    // (Le rendu Flutter CanvasKit dessine le texte dans un canvas, donc rien
+    //  n'est lisible/sélectionnable dans le DOM — la copie de texte est déjà
+    //  naturellement empêchée.)
+    document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    document.addEventListener('selectstart', function (e) { e.preventDefault(); });
+    document.addEventListener('dragstart', function (e) { e.preventDefault(); });
+  </script>
+</body>
+</html>
